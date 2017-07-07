@@ -1,6 +1,9 @@
 package com.github.wimve.githubissuesummary;
 
-import org.apache.commons.cli.*;
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.CommandLineParser;
+import org.apache.commons.cli.DefaultParser;
+import org.apache.commons.cli.Options;
 import org.eclipse.egit.github.core.Issue;
 import org.eclipse.egit.github.core.Milestone;
 import org.eclipse.egit.github.core.RepositoryId;
@@ -8,48 +11,37 @@ import org.eclipse.egit.github.core.client.GitHubClient;
 import org.eclipse.egit.github.core.service.IssueService;
 import org.eclipse.egit.github.core.service.MilestoneService;
 
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Properties;
 import java.util.Scanner;
 
 
 public class Main {
 
-    public static final String PARAM_CONFIG = "f";
 
-    public static final String STATUS_OPEN = "open";
-    public static final String STATUS_CLOSED = "closed";
-
-    public static final String CONFIG_USERNAME = "username";
-    public static final String CONFIG_PASSWORD = "password";
-    public static final String CONFIG_REPO_OWNER = "repo-owner";
-    public static final String CONFIG_REPO_NAME = "repo-name";
-    public static final String CONFIG_TITLE_ISSUES_CLOSED = "title-issues-closed";
-    public static final String CONFIG_TITLE_ISSUES_OPEN = "title-issues-open";
-
+    public static final String GITHUB_STATUS_OPEN = "open";
+    public static final String GITHUB_STATUS_CLOSED = "closed";
 
     public static void main(String[] args) {
 
         try {
 
             // Parse arguments (only config file path at the moment)
-            CommandLine arguments = parseArguments(args);
+            // create the command line parser
+            CommandLineParser parser = new DefaultParser();
+            Options options = getOptions();
 
-            // Load config file from path
-            Properties config = loadConfig(arguments.getOptionValue(PARAM_CONFIG));
+            CommandLine arguments = parser.parse(options, args);
 
             // Create client to connect to GitHub
-            GitHubClient client = createClient(config);
+            GitHubClient client = createClient(getOrAsk(arguments, Param.USERNAME), getOrAsk(arguments, Param.PASSWORD));
 
             // Create repo ID
-            RepositoryId repositoryId = createRepositoryId(config);
+            RepositoryId repositoryId = parseRepositoryId(getOrAsk(arguments, Param.REPONAME));
 
             // Get the repo's open milestones
-            List<Milestone> milestones = getMilestones(client, repositoryId, STATUS_OPEN);
+            List<Milestone> milestones = getMilestones(client, repositoryId, GITHUB_STATUS_OPEN);
 
             // Ask the user for the milestone interactively
             Milestone milestone = askMilestone(milestones);
@@ -61,19 +53,39 @@ public class Main {
             sysOutTitle("Milestone " + milestone.getTitle() + ":");
 
             // Output open Issues
-            sysOutTitle(config.getProperty(CONFIG_TITLE_ISSUES_OPEN));
-            printIssues(getIssues(client, repositoryId, milestone, STATUS_OPEN));
+            sysOutTitle(getOrDefault(arguments, Param.TITLE_OPEN, "Open:"));
+            printIssues(getIssues(client, repositoryId, milestone, GITHUB_STATUS_OPEN));
 
             // Output closed Issues
-            sysOutTitle(config.getProperty(CONFIG_TITLE_ISSUES_CLOSED));
-            printIssues(getIssues(client, repositoryId, milestone, STATUS_CLOSED));
+            sysOutTitle(getOrDefault(arguments, Param.TITLE_CLOSED, "Closed:"));
+            printIssues(getIssues(client, repositoryId, milestone, GITHUB_STATUS_CLOSED));
 
             // Give the output some space
             sysOut("");
 
         } catch (Exception e) {
-            System.err.println(e);
+            System.err.println(e.getMessage());
         }
+    }
+
+    private static String getOrAsk(CommandLine arguments, Param param) {
+
+        if (arguments.hasOption(param.getOpt())) {
+            return arguments.getOptionValue(param.getOpt());
+        } else {
+
+            System.out.print("Please provide " + param.getDescription() + ": ");
+
+            if (param.isPassword()) {
+                return readPassword();
+            } else {
+                return new Scanner(System.in).next();
+            }
+        }
+    }
+
+    private static String getOrDefault(CommandLine arguments, Param param, String defaultValue) {
+        return arguments.getOptionValue(param.getOpt(), defaultValue);
     }
 
     private static void sysOutTitle(String title) {
@@ -81,29 +93,13 @@ public class Main {
         sysOut(title);
     }
 
-    private static CommandLine parseArguments(String[] args) throws ParseException {
-        // create the command line parser
-        CommandLineParser parser = new DefaultParser();
-
-        // create Options object
+    private static Options getOptions() {
+        // create CLI options
         Options options = new Options();
-        options.addOption(PARAM_CONFIG, true, "set config file path");
-
-        CommandLine arguments = parser.parse(options, args);
-
-        // Check arguments
-        if (!arguments.hasOption(PARAM_CONFIG)) {
-            throw new IllegalArgumentException("Please provide a config file");
+        for (Param p : Param.values()) {
+            options.addOption(p.getOpt(), true, p.getDescription());
         }
-
-        return arguments;
-    }
-
-    private static Properties loadConfig(String settingsFile) throws IOException {
-        Properties config = new Properties();
-        InputStream input = new FileInputStream(settingsFile);
-        config.load(input);
-        return config;
+        return options;
     }
 
     private static Milestone askMilestone(List<Milestone> milestones) {
@@ -126,22 +122,24 @@ public class Main {
         return milestoneService.getMilestones(repositoryId, status);
     }
 
-    private static RepositoryId createRepositoryId(Properties config) {
-        return new RepositoryId(
-                config.getProperty(CONFIG_REPO_OWNER),
-                config.getProperty(CONFIG_REPO_NAME)
-        );
+    private static RepositoryId parseRepositoryId(String repoKey) {
+        if (repoKey != null) {
+
+            // parse owner/repository format
+            String[] keyElements = repoKey.split("/");
+
+            if (keyElements.length == 2) {
+                return new RepositoryId(
+                        keyElements[0],  // owner
+                        keyElements[1]   // repository
+                );
+            }
+        }
+        throw new IllegalArgumentException("Repository argument should use owner/repository format");
     }
 
-    private static GitHubClient createClient(Properties config) {
-
-        GitHubClient client = new GitHubClient();
-
-        client.setCredentials(
-                config.getProperty(CONFIG_USERNAME),
-                config.getProperty(CONFIG_PASSWORD)
-        );
-        return client;
+    private static GitHubClient createClient(String username, String password) {
+        return (new GitHubClient()).setCredentials(username, password);
     }
 
     private static void sysOut(String message) {
@@ -156,10 +154,19 @@ public class Main {
 
     private static List<Issue> getIssues(GitHubClient client, RepositoryId repositoryId, Milestone milestone, String status) throws IOException {
         IssueService issueService = new IssueService(client);
-        HashMap<String, String> parameters = new HashMap<String, String>();
+        HashMap<String, String> parameters = new HashMap<>();
         parameters.put("filter", "all");
         parameters.put("state", status);
         parameters.put("milestone", Integer.toString(milestone.getNumber()));
         return issueService.getIssues(repositoryId, parameters);
+    }
+
+    private static String readPassword() {
+        // Check if we are invoked from within console window
+        if (System.console() == null) {
+            throw new RuntimeException("Console not available");
+        } else {
+            return new String(System.console().readPassword());
+        }
     }
 }
