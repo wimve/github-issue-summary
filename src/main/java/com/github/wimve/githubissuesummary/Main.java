@@ -51,6 +51,7 @@ public class Main {
 
             // Output chosen milestone
             sysOutTitle("Milestone " + milestone.getTitle() + ":");
+            sysOutTitle("Bij deze de actuele status van de issues:");
 
             // Output open Issues
             sysOutTitle(getOrDefault(arguments, Param.TITLE_OPEN, "Open:"));
@@ -148,7 +149,7 @@ public class Main {
 
     private static void printIssues(List<Issue> issues) {
         for (Issue issue : issues) {
-            sysOut(String.format("- Issue %d: %s ", issue.getNumber(), issue.getTitle()));
+            sysOut(String.format("- Issue #%d: %s ", issue.getNumber(), issue.getTitle()));
         }
     }
 
