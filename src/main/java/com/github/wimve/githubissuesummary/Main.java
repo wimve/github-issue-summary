@@ -12,9 +12,7 @@ import org.eclipse.egit.github.core.service.IssueService;
 import org.eclipse.egit.github.core.service.MilestoneService;
 
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Scanner;
+import java.util.*;
 
 
 public class Main {
@@ -159,7 +157,14 @@ public class Main {
         parameters.put("filter", "all");
         parameters.put("state", status);
         parameters.put("milestone", Integer.toString(milestone.getNumber()));
-        return issueService.getIssues(repositoryId, parameters);
+        List<Issue> issues = issueService.getIssues(repositoryId, parameters);
+        Collections.sort(issues, new Comparator<Issue>() {
+            @Override
+            public int compare(Issue o1, Issue o2) {
+                return Integer.compare(o2.getNumber(), o1.getNumber());
+            }
+        });
+        return issues;
     }
 
     private static String readPassword() {
