@@ -6,15 +6,19 @@ import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.Options;
 import org.eclipse.egit.github.core.Issue;
 import org.eclipse.egit.github.core.Milestone;
+import org.eclipse.egit.github.core.PullRequest;
 import org.eclipse.egit.github.core.RepositoryId;
 import org.eclipse.egit.github.core.client.GitHubClient;
 import org.eclipse.egit.github.core.service.IssueService;
 import org.eclipse.egit.github.core.service.MilestoneService;
 
 import java.io.IOException;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Scanner;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 
 public class Main {
@@ -51,13 +55,14 @@ public class Main {
 
             // Output chosen milestone
             sysOutTitle("Milestone " + milestone.getTitle() + ":");
+            sysOutTitle("Bij deze de actuele status van de issues:");
 
             // Output open Issues
-            sysOutTitle(getOrDefault(arguments, Param.TITLE_OPEN, "Open:"));
+            sysOutTitle(getOrDefault(arguments, Param.TITLE_OPEN, "Openstaande issues:"));
             printIssues(getIssues(client, repositoryId, milestone, GITHUB_STATUS_OPEN));
 
             // Output closed Issues
-            sysOutTitle(getOrDefault(arguments, Param.TITLE_CLOSED, "Closed:"));
+            sysOutTitle(getOrDefault(arguments, Param.TITLE_CLOSED, "Afgewerkt en klaar voor testen:"));
             printIssues(getIssues(client, repositoryId, milestone, GITHUB_STATUS_CLOSED));
 
             // Give the output some space
@@ -148,17 +153,31 @@ public class Main {
 
     private static void printIssues(List<Issue> issues) {
         for (Issue issue : issues) {
-            sysOut(String.format("- Issue %d: %s ", issue.getNumber(), issue.getTitle()));
+            sysOut(String.format("- Issue #%d: %s ", issue.getNumber(), issue.getTitle()));
+        }
+        if (issues.isEmpty()) {
+            sysOut("geen");
         }
     }
 
     private static List<Issue> getIssues(GitHubClient client, RepositoryId repositoryId, Milestone milestone, String status) throws IOException {
+        return getIssues(client, repositoryId, milestone, status, false);
+    }
+
+    private static List<Issue> getIssues(GitHubClient client, RepositoryId repositoryId, Milestone milestone, String status, boolean includePullRequests) throws IOException {
         IssueService issueService = new IssueService(client);
         HashMap<String, String> parameters = new HashMap<>();
         parameters.put("filter", "all");
         parameters.put("state", status);
         parameters.put("milestone", Integer.toString(milestone.getNumber()));
-        return issueService.getIssues(repositoryId, parameters);
+        final List<Issue> issues = issueService.getIssues(repositoryId, parameters);
+        if (!includePullRequests) {
+            return issues.stream()
+                    .filter((Issue issue) -> !isPullRequest(issue))
+                    .sorted((Issue o1, Issue o2) -> Integer.compare(o2.getNumber(), o1.getNumber()))
+                    .collect(Collectors.toList());
+        }
+        return issues;
     }
 
     private static String readPassword() {
@@ -168,5 +187,16 @@ public class Main {
         } else {
             return new String(System.console().readPassword());
         }
+    }
+
+    /**
+     * https://developer.github.com/v3/issues/#list-issues
+     * Note: GitHub's REST API v3 considers every pull request an issue, but not every issue is a pull request. For this reason, "Issues" endpoints may return both issues and pull requests in the response. You can identify pull requests by the pull_request key.
+     *
+     * Be aware that the id of a pull request returned from "Issues" endpoints will be an issue id. To find out the pull request id, use the "List pull requests" endpoint.
+     */
+    private static boolean isPullRequest(Issue issue) {
+        final PullRequest pullRequest = issue.getPullRequest();
+        return pullRequest != null && pullRequest.getUrl() != null;
     }
 }
